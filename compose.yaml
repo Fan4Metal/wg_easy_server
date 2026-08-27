@@ -1,0 +1,64 @@
+volumes:
+  etc_wireguard:
+  caddy_data:
+  caddy_config:
+
+services:
+  wg-easy:
+    environment:
+     - EXPERIMENTAL_AWG=true
+     - OVERRIDE_AUTO_AWG=awg
+
+    image: ghcr.io/wg-easy/wg-easy:15
+    container_name: wg-easy
+    networks:
+      wg:
+        ipv4_address: 10.42.42.42
+        ipv6_address: fdcc:ad94:bacf:61a3::2a
+    volumes:
+      - etc_wireguard:/etc/wireguard
+      - /lib/modules:/lib/modules:ro
+    ports:
+      - "443:443/udp"
+    restart: unless-stopped
+    # Встроенный healthcheck образа использует `wg show`, который не видит
+    # amneziawg-интерфейсы, поэтому контейнер всегда помечается unhealthy
+    healthcheck:
+      test: ["CMD-SHELL", "awg show | grep -q interface || exit 1"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+      # - NET_RAW # ⚠️ Uncomment if using Podman
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv6.conf.all.disable_ipv6=0
+      - net.ipv6.conf.all.forwarding=1
+      - net.ipv6.conf.default.forwarding=1
+
+  caddy:
+    image: caddy:2
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - wg
+
+networks:
+  wg:
+    driver: bridge
+    enable_ipv6: true
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.42.42.0/24
+        - subnet: fdcc:ad94:bacf:61a3::/64
